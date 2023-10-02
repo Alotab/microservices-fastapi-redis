@@ -1,13 +1,18 @@
 from fastapi import FastAPI, Body, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.background import BackgroundTasks
 from redis_om import get_redis_connection, HashModel
 from pydantic import BaseModel
+from starlette.requests import Request
+import requests
+import time
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['http://127.0.0.1:8000'],
+    # allow_origins=['*'],
     allow_methods=['*'],
     allow_headers=['*']
 )
@@ -50,10 +55,46 @@ class Order(HashModel):
         database = redis
 
 
+
+@app.get('/orders/{pk}')
+def get(pk: str):
+    return Order.get(pk)
+
+
+@app.post("/orders")
+async def create(request: Request, background_task: BackgroundTasks):
+    body = await request.json()
+
+    req =  requests.get(f"http://127.0.0.1:8000/products/item/01HBRC52T9SD9QQ8ZBMVQEBAQF")
+    product = req.json()
+
+    order = Order(
+        product_id=body['id'],
+        price=product['price'],
+        fee= 0.2 * product['price'],
+        total= 1.2 * product['price'],
+        quantity=body['quantity'],
+        status='pending'
+    )
+    order.save()
+
+    background_task.add_task(order_completed, order)
+    return order
+
+def order_completed(order: Order):
+    time.sleep(5)
+    order.status = 'completed'
+    order.save()
+    redis.xadd('order_completed', order.dict(), '*')
+
+
+# 01HBRC52T9SD9QQ8ZBMVQEBAQF
+
+
+
 @app.get("/products")
 def all():
     return [ format(pk) for pk in Product.all_pks()]
-
 
 
 def format(pk: str):
